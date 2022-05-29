@@ -281,6 +281,8 @@ volatile uint16_t thftable[256] = {1311, 1326, 1341, 1356, 1371, 1387, 1402, 141
 	volatile uint8_t ai_speed_old;
 	volatile uint8_t ai_attack;
 	volatile uint8_t ai_decay;
+	volatile uint8_t ai_extern;
+	volatile uint8_t adc_flag_count;
 	volatile uint8_t adc_channel=0;
 	volatile uint16_t adc_value[6];
 	volatile uint16_t adc_value_sum[6];
@@ -340,7 +342,33 @@ int main(void)
 //	ADC1->CR1 |= (1<<5)|(1<<8)|(1<<11); //EOC, Scanmode,  Discontinuous mode on regular channels
 //	ADC1->CR2 |=(1<<20); //EXTTRIG: External trigger conversion mod
 //	ADC1->SQR3 = 1;
+
+	//Switch Voltage Regulator on
+//	ADC1->CR |= (1<<28);
+//	HAL_Delay(500);
+//	//Switch on ADC
+//	ADC1->CR |= (1<<0);
+
+	//Calibration
+	ADC1->CR &= ~(1<<0);
+	ADC1->CFGR1 &= ~(1<<0);
+	ADC1->CR |= (1<<31);
+	while(ADC1->CR &(1<<31));
+
+	//Switch on ADC
+	ADC1->CR |= (1<<0);
 	ADC1->SMPR = 5 ;
+	ADC1->CFGR1 |= (1<<21);
+	ADC1->CFGR1 &= ~(1<<2);
+	ADC1->IER |= (1<<3);
+	//Set Channel
+	ADC1->CHSELR = 0;
+	//Cont
+	ADC1->CFGR1 &= ~(1<<13);
+	//ADC Start
+	ADC1->CR |= (1<<2);
+
+
 	SPI2->CR1 |=(1<<6);
 
 	HAL_GPIO_WritePin(LED1_GPIO_Port, LED1_Pin, GPIO_PIN_SET);
@@ -833,7 +861,8 @@ void adc_start(void){
 		case 0:adc_value_sum[0] = adc_value_sum[0] + (ADC1->DR>>5);break;
 		case 1:adc_value_sum[1] = adc_value_sum[1] +  (ADC1->DR>>4);break;
 		case 2:adc_value_sum[2] = adc_value_sum[2] + (ADC1->DR>>4);break;
-		default: break;
+		case 3:adc_value_sum[3] = adc_value_sum[3] + (ADC1->DR>>4);break;
+		efault: break;
 		}
 		adc_averagecount++;
 		if (adc_averagecount == 48){
@@ -841,6 +870,7 @@ void adc_start(void){
 			ai_speed = adc_value_sum[0]>>4;
 			ai_attack = adc_value_sum[1]>>4;
 			ai_decay = adc_value_sum[2]>>4;
+			ai_extern = adc_value_sum[3]>>4;
 			for(int i = 0; i<4; i++){
 			adc_value_sum[i]=0;
 			}
@@ -849,16 +879,16 @@ void adc_start(void){
 
 		// Switch ADC channel
 		adc_channel++;
-			if(adc_channel == 3){
+			if(adc_channel == 4){
 				adc_channel = 0;
 			}
 		// Switch ADC channel ADC register
 		ADC1->CHSELR = channelnumbers[adc_channel];
 		adc_flag = 0;
 		// Start conversion
-
+		ADC1->IER |= (1<<3);
 		ADC1->CR |= (1<<2);	//Start Conversion
-		ADC1->ISR |= (1<<2);
+
 		}
 }
 
@@ -887,7 +917,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 void ADC1_IRQHandler(void)
 {
 	// Conversion done
-
+	adc_flag_count++;
 	adc_flag = 1;
 //	HAL_ADC_Stop_IT (&hadc1);
 	ADC1->ISR &= ~(1<<5);
