@@ -533,11 +533,12 @@ void process_buttons(void){
 
 		if(HAL_GPIO_ReadPin(TRIGGER_GPIO_Port, TRIGGER_Pin )){
 			button_in &= ~(1<<8);
-			global_gate=1;
+			global_gate=0;
 		}
 		else{
-			button_in |= (1<<6);
-			global_gate=0;
+			button_in |= (1<<8);
+			global_gate=1;
+
 		}
 		//Debounce
 		buttons_pressed = get_key_press(button_in);
@@ -915,10 +916,11 @@ void adc_start(void){
 		}
 }
 
-void EXTI3_IRQHandler(void)
+void EXTI4_15_IRQHandler(void)
 {
   /* USER CODE BEGIN EXTI0_IRQn 0 */
-
+	global_trigger = 1;
+	testcount++;
   /* USER CODE END EXTI0_IRQn 0 */
 //  HAL_GPIO_EXTI_IRQHandler(Trigger_In_Pin);
 	 HAL_GPIO_EXTI_IRQHandler(TRIGGER_Pin);
@@ -930,7 +932,7 @@ void EXTI3_IRQHandler(void)
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
     if ( GPIO_Pin == TRIGGER_Pin)
-    {
+    {	testcount++;
     	global_trigger = 1;
 //    	HAL_GPIO_TogglePin(LED_2_GPIO_Port, LED_2_Pin);
     }
@@ -1409,7 +1411,7 @@ static void MX_GPIO_Init(void)
                            ADSR_Pin TRIGGER_Pin */
   GPIO_InitStruct.Pin = PUSH1_Pin|PUSH2_Pin|PUSH3_Pin|PUSH4_Pin
                           |LFO_WAVE_1_Pin|LFO_WAVE_2_Pin|LFO_RANGE_1_Pin|LFO_RANGE_2_Pin
-                          |ADSR_Pin|TRIGGER_Pin;
+                          |ADSR_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
@@ -1427,6 +1429,15 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+
+  //EXTI9
+  GPIO_InitStruct.Pin = TRIGGER_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  HAL_NVIC_SetPriority(EXTI4_15_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(EXTI4_15_IRQn);
 
 }
 
