@@ -38,7 +38,7 @@ TIM_HandleTypeDef htim3; // Debounce
 TIM_HandleTypeDef htim6;
 TIM_HandleTypeDef htim7; // Sampler
 
-UART_HandleTypeDef huart1;
+//UART_HandleTypeDef huart1;
 
 
 void SystemClock_Config(void);
@@ -195,6 +195,7 @@ volatile uint16_t thftable[256] = {1311, 1326, 1341, 1356, 1371, 1387, 1402, 141
 	uint8_t parameter_leds_old;
 	uint8_t parameter_secondpage;
 	uint8_t parameter_secondpageold;
+	uint8_t testcount;
 	// LFO
 	volatile float global_sample_freq = 5000;
 	volatile float global_sample_freq_dac = 5000;
@@ -324,7 +325,7 @@ int main(void)
   SystemClock_Config();
 
   MX_GPIO_Init();
-  MX_USART1_UART_Init();
+//  MX_USART1_UART_Init();
   MX_SPI2_Init();
   MX_ADC1_Init();
   MX_TIM1_Init();
@@ -392,6 +393,10 @@ int main(void)
 	mPhaseIncrement = tfftable[10];
 	render_lfo();
 	print_leds();
+
+	HAL_GPIO_WritePin(GPIOA, GPIO_PIN_9, GPIO_PIN_RESET);
+
+
 
 
   while (1)
@@ -569,21 +574,26 @@ void process_buttons(void){
 			else{
 				parameter_set ^= (1<<1);
 				parameter_leds ^= (1<<1);
+				lfo_audio^= 1;
 				}
 
 		}
+		// Pushbuttons 3 - ENV Loop
 		if(buttons_pressed &(1<<6)){
 			if(parameter_secondpage){
 				parameter_set ^= (1<<6);
 				parameter_leds ^= (1<<6);
+				testcount++;
 				}
 			else{
 				parameter_set ^= (1<<2);
 				parameter_leds ^= (1<<2);
+				loop ^= 1;
+				testcount++;
 				}
 		}
 
-		// Pushbuttons 2 - LFO Audio
+		// Pushbuttons 4 - ENV Kurve
 		if(buttons_pressed &(1<<7)){
 			if(parameter_secondpage){
 				parameter_set ^= (1<<7);
@@ -744,13 +754,7 @@ void SPI2_IRQHandler(void)
 
 }
 
-void TIM3_IRQHandler(void)
-{
-adc_flag_2 = 1 ;
 
-  HAL_TIM_IRQHandler(&htim3);
-
-}
 // Audiosampler and DAC Out
 void TIM7_IRQHandler(void){
 //	dummy_value = SPI2 -> DR;
@@ -853,27 +857,47 @@ void TIM7_IRQHandler(void){
 //	volatile uint8_t adc_averagecount;
 //}
 
+void TIM3_IRQHandler(void)
+{
+adc_flag_2 = 1 ;
+adc_flag_count++;
+
+  HAL_TIM_IRQHandler(&htim3);
+
+}
+
+void ADC1_IRQHandler(void)
+{
+	// Conversion done
+
+	adc_flag = 1;
+//	HAL_ADC_Stop_IT (&hadc1);
+	ADC1->ISR &= ~(1<<5);
+//	HAL_GPIO_TogglePin(Trigger_Output_GPIO_Port, Trigger_Output_Pin);
+	HAL_ADC_IRQHandler(&hadc1);
+}
+
 void adc_start(void){
 	if(adc_flag){
 		// Add ADC result to sum variable
 		switch(adc_channel){
-		case 0:adc_value_sum[0] = adc_value_sum[0] + (ADC1->DR>>5);break;
-		case 1:adc_value_sum[1] = adc_value_sum[1] +  (ADC1->DR>>4);break;
-		case 2:adc_value_sum[2] = adc_value_sum[2] + (ADC1->DR>>4);break;
-		case 3:adc_value_sum[3] = adc_value_sum[3] + (ADC1->DR>>4);break;
-		efault: break;
+		case 0:ai_speed = (ADC1->DR>>4);break;
+		case 1:ai_attack = (ADC1->DR>>4);break; //adc_value_sum[1] + adc_value_sum[0] +
+		case 2:ai_decay = (ADC1->DR>>4);break; //adc_value_sum[1] +
+		case 3:ai_extern = (ADC1->DR>>4);break; //adc_value_sum[3]
+		default: break;
 		}
-		adc_averagecount++;
-		if (adc_averagecount == 48){
-			adc_averagecount = 0;
-			ai_speed = adc_value_sum[0]>>4;
-			ai_attack = adc_value_sum[1]>>4;
-			ai_decay = adc_value_sum[2]>>4;
-			ai_extern = adc_value_sum[3]>>4;
-			for(int i = 0; i<4; i++){
-			adc_value_sum[i]=0;
-			}
-		}
+//		adc_averagecount++;
+//		if (adc_averagecount == 64){
+//			adc_averagecount = 0;
+//			ai_speed = adc_value_sum[0]>>4;
+//			ai_attack = adc_value_sum[1]>>4;
+//			ai_decay = adc_value_sum[2]>>4;
+//			ai_extern = adc_value_sum[3]>>4;
+//			for(int i = 0; i<4; i++){
+//			adc_value_sum[i]=0;
+//			}
+//		}
 
 
 		// Switch ADC channel
@@ -884,8 +908,8 @@ void adc_start(void){
 		// Switch ADC channel ADC register
 		ADC1->CHSELR = channelnumbers[adc_channel];
 		adc_flag = 0;
-		// Start conversion
-		ADC1->IER |= (1<<3);
+
+		ADC1->IER |= (1<<3); // Start Interrupt
 		ADC1->CR |= (1<<2);	//Start Conversion
 
 		}
@@ -913,16 +937,7 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 }
 
 
-void ADC1_IRQHandler(void)
-{
-	// Conversion done
-	adc_flag_count++;
-	adc_flag = 1;
-//	HAL_ADC_Stop_IT (&hadc1);
-	ADC1->ISR &= ~(1<<5);
-//	HAL_GPIO_TogglePin(Trigger_Output_GPIO_Port, Trigger_Output_Pin);
-	HAL_ADC_IRQHandler(&hadc1);
-}
+
 // Button debouncing
 
 ///////////////////////////////////////////////////////////////////
@@ -932,10 +947,10 @@ void ADC1_IRQHandler(void)
 //
 uint16_t get_key_press( uint16_t key_mask )
 {
-	HAL_TIM_Base_Stop(&htim3);                                          // read and clear atomic !
+	HAL_TIM_Base_Stop(&htim6);                                          // read and clear atomic !
 	key_mask &= key_press;                          // read key(s)
 	key_press ^= key_mask;                          // clear key(s)
-	HAL_TIM_Base_Start(&htim3);
+	HAL_TIM_Base_Start(&htim6);
 	return key_mask;
 }
 
@@ -949,10 +964,10 @@ uint16_t get_key_press( uint16_t key_mask )
 //
 uint16_t get_key_rpt( uint16_t key_mask )
 {
-	HAL_TIM_Base_Stop(&htim3);                                          // read and clear atomic !
+	HAL_TIM_Base_Stop(&htim6);                                          // read and clear atomic !
 	key_mask &= key_rpt;                            // read key(s)
 	key_rpt ^= key_mask;                            // clear key(s)
-	HAL_TIM_Base_Start(&htim3);
+	HAL_TIM_Base_Start(&htim6);
 	return key_mask;
 }
 
@@ -971,7 +986,7 @@ uint16_t get_key_state( uint16_t key_mask )
 //
 uint16_t get_key_short( uint16_t key_mask )
 {
-	HAL_TIM_Base_Stop(&htim3);                                          // read key state and key press atomic !
+	HAL_TIM_Base_Stop(&htim6);                                          // read key state and key press atomic !
 	return get_key_press( ~key_state & key_mask );
 }
 
@@ -1202,9 +1217,9 @@ static void MX_TIM3_Init(void)
 
   /* USER CODE END TIM3_Init 1 */
   htim3.Instance = TIM3;
-  htim3.Init.Prescaler = 6400-1;
+  htim3.Init.Prescaler = 1280-1;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = 90;
+  htim3.Init.Period = 1000;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
@@ -1246,9 +1261,9 @@ static void MX_TIM6_Init(void)
 
   /* USER CODE END TIM6_Init 1 */
   htim6.Instance = TIM6;
-  htim6.Init.Prescaler = 0;
+  htim6.Init.Prescaler = 640-1;
   htim6.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim6.Init.Period = 65535;
+  htim6.Init.Period = 100;
   htim6.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim6) != HAL_OK)
   {
@@ -1309,48 +1324,48 @@ static void MX_TIM7_Init(void)
   * @param None
   * @retval None
   */
-static void MX_USART1_UART_Init(void)
-{
-
-  /* USER CODE BEGIN USART1_Init 0 */
-
-  /* USER CODE END USART1_Init 0 */
-
-  /* USER CODE BEGIN USART1_Init 1 */
-
-  /* USER CODE END USART1_Init 1 */
-  huart1.Instance = USART1;
-  huart1.Init.BaudRate = 115200;
-  huart1.Init.WordLength = UART_WORDLENGTH_8B;
-  huart1.Init.StopBits = UART_STOPBITS_1;
-  huart1.Init.Parity = UART_PARITY_NONE;
-  huart1.Init.Mode = UART_MODE_TX_RX;
-  huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-  huart1.Init.OverSampling = UART_OVERSAMPLING_16;
-  huart1.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
-  huart1.Init.ClockPrescaler = UART_PRESCALER_DIV1;
-  huart1.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
-  if (HAL_UART_Init(&huart1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_UARTEx_SetTxFifoThreshold(&huart1, UART_TXFIFO_THRESHOLD_1_8) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_UARTEx_SetRxFifoThreshold(&huart1, UART_RXFIFO_THRESHOLD_1_8) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_UARTEx_DisableFifoMode(&huart1) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN USART1_Init 2 */
-
-  /* USER CODE END USART1_Init 2 */
-
-}
+//static void MX_USART1_UART_Init(void)
+//{
+//
+//  /* USER CODE BEGIN USART1_Init 0 */
+//
+//  /* USER CODE END USART1_Init 0 */
+//
+//  /* USER CODE BEGIN USART1_Init 1 */
+//
+//  /* USER CODE END USART1_Init 1 */
+//  huart1.Instance = USART1;
+//  huart1.Init.BaudRate = 115200;
+//  huart1.Init.WordLength = UART_WORDLENGTH_8B;
+//  huart1.Init.StopBits = UART_STOPBITS_1;
+//  huart1.Init.Parity = UART_PARITY_NONE;
+//  huart1.Init.Mode = UART_MODE_TX_RX;
+//  huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+//  huart1.Init.OverSampling = UART_OVERSAMPLING_16;
+//  huart1.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
+//  huart1.Init.ClockPrescaler = UART_PRESCALER_DIV1;
+//  huart1.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
+//  if (HAL_UART_Init(&huart1) != HAL_OK)
+//  {
+//    Error_Handler();
+//  }
+//  if (HAL_UARTEx_SetTxFifoThreshold(&huart1, UART_TXFIFO_THRESHOLD_1_8) != HAL_OK)
+//  {
+//    Error_Handler();
+//  }
+//  if (HAL_UARTEx_SetRxFifoThreshold(&huart1, UART_RXFIFO_THRESHOLD_1_8) != HAL_OK)
+//  {
+//    Error_Handler();
+//  }
+//  if (HAL_UARTEx_DisableFifoMode(&huart1) != HAL_OK)
+//  {
+//    Error_Handler();
+//  }
+//  /* USER CODE BEGIN USART1_Init 2 */
+//
+//  /* USER CODE END USART1_Init 2 */
+//
+//}
 
 /**
   * @brief GPIO Initialization Function
@@ -1383,7 +1398,7 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_Init(SP_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : LED_Gate_Pin */
-  GPIO_InitStruct.Pin = LED_Page_Pin;
+  GPIO_InitStruct.Pin = LED_Page_Pin | GPIO_PIN_9;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
