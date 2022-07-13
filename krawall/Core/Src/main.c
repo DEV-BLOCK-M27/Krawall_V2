@@ -235,6 +235,8 @@ volatile uint16_t thftable[256] = {1311, 1326, 1341, 1356, 1371, 1387, 1402, 141
     uint32_t dac_watch;
     uint32_t render_watch;
     uint32_t dr_watch;
+    uint8_t lfo_speed;
+    uint8_t lfo_extern;
 	// Envelope
 	volatile float adsr_parametervalue;
 	volatile uint32_t adsr_countervalue;
@@ -304,6 +306,7 @@ volatile uint16_t thftable[256] = {1311, 1326, 1341, 1356, 1371, 1387, 1402, 141
 	volatile uint8_t midinote = 20;
 	volatile uint8_t midicompleteflag;
 	volatile uint8_t midistatus;
+	volatile uint8_t midistatus_old;
 	volatile uint8_t midichannelrx;
 	volatile uint8_t midimodwheel;
 	volatile uint8_t midistat;
@@ -421,13 +424,20 @@ int main(void)
 			adc_start();
 		}
 
-		if(ai_speed != ai_speed_old || lfo_range != lfo_range_old){
+		if(ai_speed != ai_speed_old || lfo_range != lfo_range_old || midistatus_old != midistatus){
 			ai_speed_old = ai_speed;
+			midistatus_old = midistatus;
 			lfo_range_old = lfo_range;
+			if(lfo_extern == 0){
+				lfo_speed = ai_speed;
+			}
+			else{
+				lfo_speed = midinote;
+			}
 			switch (lfo_range){
-			case 0: mPhaseIncrement = thftable[ai_speed]; break;
-			case 1: mPhaseIncrement = tfftable[ai_speed]; break;
-			case 2: mPhaseIncrement = tlftable[ai_speed]; break;
+			case 0: mPhaseIncrement = thftable[lfo_speed]; break;
+			case 1: mPhaseIncrement = tfftable[lfo_speed]; break;
+			case 2: mPhaseIncrement = tlftable[lfo_speed]; break;
 			default: break;
 			}
 
@@ -609,10 +619,12 @@ void process_buttons(void){
 			if(parameter_secondpage){
 				parameter_set ^= (1<<7);
 				parameter_leds ^= (1<<7);
+				lfo_extern ^= 1;
 				}
 			else{
 				parameter_set ^= (1<<3);
 				parameter_leds ^= (1<<3);
+				lfo_extern ^= 1;
 				}
 		}
 
@@ -765,12 +777,10 @@ void midiprocessing(void){
 					midinote = midibuffer[1];
 					midistatus = 1;		//NoteOn
 					notetableposition[getnote]=midibuffer[1];
-					GPIOC->ODR |= (1<<7); // Gate on
 					global_trigger = 1;
 				}
 				//Note Off
 				else if(midistat==8 ){
-					GPIOC->ODR &= ~(1<<7); // Gate off
 					midistatus = 0; //NoteOff
 					midinote = midibuffer[1];
 				}
