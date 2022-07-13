@@ -203,6 +203,8 @@ volatile uint16_t thftable[256] = {1311, 1326, 1341, 1356, 1371, 1387, 1402, 141
 	volatile uint32_t lfocountervaluecalc[2];
 	volatile uint32_t lfocountervalue[2];
 	volatile uint8_t lfo_timer_count;
+	volatile uint8_t lfo_tri_position;
+	volatile uint32_t lfo_tri_calc;
 	volatile uint8_t lfoparamtervalue[2];
 	volatile uint32_t lfovalue[2];
 	volatile uint32_t lfovaluerect[2];
@@ -686,11 +688,13 @@ void render_lfo(void){
 			mPhase = mPhase - 65536;
 		}
 
-		getphase = mPhase; // Concert double to int
+		getphase = mPhase; // Convert double to int
 		//getphase &= ~(0b0000000000000000); //Modulo 65536, mask integer bits
 		getbuffer = (getphase>>8);
 		switch (lfowaveform){
+		//Saw
 		case 0: buffer[i] = (getphase>>4); break;
+		//Square
 		case 1: if (getphase<32763){
 					buffer[i] = 4095;
 				}
@@ -698,11 +702,14 @@ void render_lfo(void){
 					buffer[i] = 0;
 				}
 				break;
-		case 2: if (getphase<65526){
-					buffer[i] = 2*getphase;
+		//Triangle
+		case 2:
+				if (getphase<=32767){
+					buffer[i] = (2*getphase)>>4;
 				}
 				else{
-					buffer[i] = 4095-(2*getphase);
+					lfo_tri_calc = getphase*2 - 65535;
+					buffer[i] = ((65535-lfo_tri_calc)>>4);
 				}
 				break;
 		default: break;
@@ -716,12 +723,12 @@ void calc_data(void){
 
 	  // Envelope calc data
 	  adsr_attackcalc = ~ai_attack;
-//	  adsr_attack = 2*log_table[ai_attack];
+	  adsr_attack = 2*log_table[ai_attack];
 	  adsr_attack= (adsr_attack/256) + 0.5;
 	  adsr_attackcountervalue = (4096<<14)/(5000/adsr_attack);
 
 	  adsr_decaycalc = ~ai_decay;
-//	  adsr_decay =  8*log_table[ai_decay];
+	  adsr_decay =  8*log_table[ai_decay];
 	  adsr_decay =  (adsr_decay/256) + 0.5;
 	  adsr_decaycountervalue = (4096<<14)/(5000/adsr_decay);
 
@@ -759,28 +766,29 @@ void SPI2_IRQHandler(void)
 // Audiosampler and DAC Out
 void TIM7_IRQHandler(void){
 //	dummy_value = SPI2 -> DR;
-	dac_extern_getvalue1 = 0b0011000000000001  |buffer[dac_buffer_count];
-	dac_extern_getvalue2 = 0b1011000000000000  |(adsr_output);
+	dac_extern_getvalue2 = 0b0011000000000001  |buffer[dac_buffer_count];
+	dac_extern_getvalue1 = 0b1011000000000000  |(adsr_output);
 	spi_send_flag =1;
 	SPI2->CR1 |=(1<<6);
 	HAL_GPIO_WritePin(GPIOB,GPIO_PIN_12, RESET);
 	SPI2 -> DR = dac_extern_getvalue1;
 	lfo_output[0] = buffer[dac_buffer_count];
 	if(lfo_audio){
-	dac_buffer_count++;
-	}
+		dac_buffer_count++;
+		}
 	else{
 		lfo_timer_count++;
 		if(lfo_timer_count == 50){
 			lfo_timer_count = 0;
 			dac_buffer_count++;
 		}
-
 	}
+
 	if (dac_buffer_count == 256){
 		dac_watch++;
 		dac_buffer_count = 0;
 	}
+
 	//ADSR
 	if(global_trigger){
 		adsr_stage = 1;
@@ -933,8 +941,8 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
     if ( GPIO_Pin == TRIGGER_Pin)
     {	testcount++;
-    	global_trigger = 1;
-//    	HAL_GPIO_TogglePin(LED_2_GPIO_Port, LED_2_Pin);
+//    	global_trigger = 1;
+//    	HAL_GPIO_TogglePin(LED2_GPIO_Port, LED2_Pin);
     }
 }
 
@@ -1221,7 +1229,7 @@ static void MX_TIM3_Init(void)
   htim3.Instance = TIM3;
   htim3.Init.Prescaler = 1280-1;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = 1000;
+  htim3.Init.Period = 10;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
