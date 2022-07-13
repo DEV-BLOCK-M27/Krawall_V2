@@ -38,7 +38,7 @@ TIM_HandleTypeDef htim3; // Debounce
 TIM_HandleTypeDef htim6;
 TIM_HandleTypeDef htim7; // Sampler
 
-//UART_HandleTypeDef huart1;
+UART_HandleTypeDef huart1;
 
 
 void SystemClock_Config(void);
@@ -59,6 +59,7 @@ void SystemClock_Config(void);
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin);
 void process_buttons(void);
 void print_leds(void);
+void midiprocessing(void);
 
 volatile uint16_t log_table[256] = {
 		8191,7167,6568,6143,5814,5544,5317,5119,
@@ -310,6 +311,7 @@ volatile uint16_t thftable[256] = {1311, 1326, 1341, 1356, 1371, 1387, 1402, 141
 	volatile uint8_t miditestbyte2 = 0;
 	volatile uint8_t midiupdate = 0;
 	volatile uint8_t parameter_value[12][20];
+	volatile uint8_t getnote;
 	//SPI
 	volatile uint8_t spi_send_flag;
 	volatile uint16_t dummy_value;
@@ -334,7 +336,7 @@ int main(void)
   MX_TIM3_Init();
   MX_TIM6_Init();
   MX_TIM7_Init();
-
+  MX_USART1_UART_Init();
 	HAL_TIM_Base_Start_IT(&htim3);
 	HAL_TIM_Base_Start(&htim3);
 	HAL_TIM_Base_Start_IT(&htim6);
@@ -374,8 +376,13 @@ int main(void)
 
 	SPI2->CR2 |=(1<<6);
 	SPI2->CR2 &= ~(1<<3);
+	SPI2->CR1 |= (1<<6);
 
-	SPI2->CR1 |=(1<<6);
+	USART1->CR1 |= (1<<0);  // USART enable
+	USART1->CR1 |= (1<<2);  // Receiver enable
+	USART1->CR1 |= (1<<5);  // Set Receive Interrupt, if RXFIFO is not empty
+
+
 
 
 	HAL_GPIO_WritePin(LED1_GPIO_Port, LED1_Pin, GPIO_PIN_SET);
@@ -407,6 +414,7 @@ int main(void)
 		render_lfo();
 		process_buttons();
 		calc_data();
+		midiprocessing();
 
 		if(adc_flag_2){
 			adc_flag_2 = 0 ;
@@ -742,6 +750,53 @@ void calc_data(void){
 
 }
 
+void midiprocessing(void){
+	if(midicompleteflag==1){
+		// Switch USART off
+		USART1->CR1 &= ~(1<<2);
+		midichannelrx = midibuffer[0]<<4;
+		midichannelrx = midichannelrx>>4;
+		midistat = midibuffer[0]>>4;
+		// Check if received message is a MIDI message
+		if((midibuffer[0] & (1<<7)) && (midibuffer[1] & ~(1<<7)) && ~(midibuffer[2] & (1<<7))){ //MIDI Message
+			if(midichannelrx == 0){ // MIDI Channel
+				//Note On
+				if(midistat==9){
+					midinote = midibuffer[1];
+					midistatus = 1;		//NoteOn
+					notetableposition[getnote]=midibuffer[1];
+					GPIOC->ODR |= (1<<7); // Gate on
+					global_trigger = 1;
+				}
+				//Note Off
+				else if(midistat==8 ){
+					GPIOC->ODR &= ~(1<<7); // Gate off
+					midistatus = 0; //NoteOff
+					midinote = midibuffer[1];
+				}
+				//ModWheel
+				else if(midistat==11 && midibuffer[1] == 1){
+//					midimodwheel = midibuffer[2]; // Gate off
+
+				}
+				//Pitch Wheel
+				else if(midistat==14){
+//					pitch_wheelgetvalue = (midibuffer[1] | (midibuffer[2]<<7));
+				}
+			}
+		}
+		midicompleteflag=0;
+		// Clear MIDI buffer
+		for(int k=0; k<=3; k++){
+			midibuffer[k]=0;
+		}
+		// Switch USART on
+		USART1->CR1 |= (1<<2);
+	}
+
+}
+
+
 void SPI2_IRQHandler(void)
 {
 //  /* USER CODE BEGIN SPI2_IRQn 0 */
@@ -760,6 +815,26 @@ void SPI2_IRQHandler(void)
 
   HAL_SPI_IRQHandler(&hspi2);
 
+}
+
+void USART1_IRQHandler(void)
+{
+	HAL_GPIO_TogglePin(LED3_GPIO_Port, LED3_Pin);
+	midibuffer[midibytes] = USART1->RDR;
+	midibytes++;
+	if(midibytes==3){
+		midibytes=0;
+		midicompleteflag = 1;
+	}
+	if(midicompleteflag)
+		HAL_GPIO_WritePin(LED1_GPIO_Port, LED1_Pin, GPIO_PIN_SET);
+		HAL_GPIO_WritePin(LED3_GPIO_Port, LED3_Pin, GPIO_PIN_SET);
+		HAL_GPIO_TogglePin(LED2_GPIO_Port, LED2_Pin);
+
+  HAL_UART_IRQHandler(&huart1);
+  /* USER CODE BEGIN USART1_IRQn 1 */
+
+  /* USER CODE END USART1_IRQn 1 */
 }
 
 
@@ -836,7 +911,7 @@ void TIM7_IRQHandler(void){
 						adsr_output = adsr_value>>14;
 						break;
 				case 2:	adsr_output = adsr_sustain;
-						if(global_gate == 0){
+						if(global_gate == 0 || midistatus == 0){	// Stop Sustain Stage -> Release next
 							adsr_stage = 3;
 							adsr_sustain_int = adsr_sustain;
 							adsr_value =  4095<<14;
@@ -1334,48 +1409,48 @@ static void MX_TIM7_Init(void)
   * @param None
   * @retval None
   */
-//static void MX_USART1_UART_Init(void)
-//{
-//
-//  /* USER CODE BEGIN USART1_Init 0 */
-//
-//  /* USER CODE END USART1_Init 0 */
-//
-//  /* USER CODE BEGIN USART1_Init 1 */
-//
-//  /* USER CODE END USART1_Init 1 */
-//  huart1.Instance = USART1;
-//  huart1.Init.BaudRate = 115200;
-//  huart1.Init.WordLength = UART_WORDLENGTH_8B;
-//  huart1.Init.StopBits = UART_STOPBITS_1;
-//  huart1.Init.Parity = UART_PARITY_NONE;
-//  huart1.Init.Mode = UART_MODE_TX_RX;
-//  huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
-//  huart1.Init.OverSampling = UART_OVERSAMPLING_16;
-//  huart1.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
-//  huart1.Init.ClockPrescaler = UART_PRESCALER_DIV1;
-//  huart1.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
-//  if (HAL_UART_Init(&huart1) != HAL_OK)
-//  {
-//    Error_Handler();
-//  }
-//  if (HAL_UARTEx_SetTxFifoThreshold(&huart1, UART_TXFIFO_THRESHOLD_1_8) != HAL_OK)
-//  {
-//    Error_Handler();
-//  }
-//  if (HAL_UARTEx_SetRxFifoThreshold(&huart1, UART_RXFIFO_THRESHOLD_1_8) != HAL_OK)
-//  {
-//    Error_Handler();
-//  }
-//  if (HAL_UARTEx_DisableFifoMode(&huart1) != HAL_OK)
-//  {
-//    Error_Handler();
-//  }
-//  /* USER CODE BEGIN USART1_Init 2 */
-//
-//  /* USER CODE END USART1_Init 2 */
-//
-//}
+static void MX_USART1_UART_Init(void)
+{
+
+  /* USER CODE BEGIN USART1_Init 0 */
+
+  /* USER CODE END USART1_Init 0 */
+
+  /* USER CODE BEGIN USART1_Init 1 */
+
+  /* USER CODE END USART1_Init 1 */
+  huart1.Instance = USART1;
+  huart1.Init.BaudRate = 31250;
+  huart1.Init.WordLength = UART_WORDLENGTH_8B;
+  huart1.Init.StopBits = UART_STOPBITS_1;
+  huart1.Init.Parity = UART_PARITY_NONE;
+  huart1.Init.Mode = UART_MODE_TX_RX;
+  huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+  huart1.Init.OverSampling = UART_OVERSAMPLING_16;
+  huart1.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
+  huart1.Init.ClockPrescaler = UART_PRESCALER_DIV1;
+  huart1.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
+  if (HAL_UART_Init(&huart1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_UARTEx_SetTxFifoThreshold(&huart1, UART_TXFIFO_THRESHOLD_1_8) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_UARTEx_SetRxFifoThreshold(&huart1, UART_RXFIFO_THRESHOLD_1_8) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_UARTEx_DisableFifoMode(&huart1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN USART1_Init 2 */
+
+  /* USER CODE END USART1_Init 2 */
+
+}
 
 /**
   * @brief GPIO Initialization Function
