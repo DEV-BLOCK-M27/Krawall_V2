@@ -1,0 +1,69 @@
+	if(global_trigger){
+		adsr_stage = 1;
+		adsr_value = 0;
+		global_trigger = 0;
+	}
+
+	adsr_trigger_count++;
+	if(adsr_trigger_count == 10){
+		adsr_trigger_count = 0;
+		if(ad_ar_select){
+			switch(adsr_stage){
+			case 0: break;
+			case 1: adsr_value= adsr_value + adsr_attackcountervalue;
+					if(adsr_value>4096<<14){
+						adsr_value = 4095<<14; //255<<18
+						adsr_stage = 2;
+					}
+					adsr_output = adsr_value>>14;
+					break;
+			case 2: adsr_value= adsr_value - adsr_decaycountervalue;
+					adsr_output = (adsr_value>>14);
+					if(adsr_value>1000000000){
+						adsr_value = 0;
+						adsr_output = (adsr_value>>14);
+						if(loop){
+						adsr_stage = 1;
+						}
+						else{
+						adsr_stage = 0;
+						}
+					break;
+			default: break;
+			}
+			}
+		}
+			else{
+				switch(adsr_stage){
+				case 0: break;
+				case 1: adsr_value= adsr_value + adsr_attackcountervalue;
+						if(adsr_value>4096<<14){
+							adsr_value = 4095<<14; //255<<18
+							adsr_stage = 2;
+						}
+						adsr_output = adsr_value>>14;
+						break;
+				case 2:	adsr_output = adsr_sustain;
+						if(global_gate == 0 || midistatus == 0){	// Stop Sustain Stage -> Release next
+							adsr_stage = 3;
+							adsr_sustain_int = adsr_sustain;
+							adsr_value =  4095<<14;
+						}
+						adsr_output = adsr_value>>14;
+						break;
+				case 3: adsr_value = adsr_value - adsr_releasecountervalue;
+						if(adsr_value>1000000000){
+							adsr_value = 0;
+							if(loop){
+							adsr_stage = 1;
+							}
+							else{
+							adsr_stage = 0;
+							}
+						}
+						adsr_output = (adsr_value>>14);
+						break;
+				default: break;
+			}
+			}
+				}
